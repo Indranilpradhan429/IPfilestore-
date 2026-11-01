@@ -186,8 +186,16 @@ def batch_cancel(m):
 
 @bot.message_handler(content_types=['document','video','audio','photo'])
 def handle_file(m):
-    if m.forward_from_chat:
-        update("db_channel", m.forward_from_chat.id)
+    # DB Set sudhu text forward e hobe, movie forward e na
+@bot.message_handler(func=lambda m: m.forward_from_chat and not m.document and not m.video and not m.photo)
+def set_db(m):
+    update("db_channel", m.forward_from_chat.id)
+    bot.send_message(m.chat.id, f"✅ DB Set: {m.forward_from_chat.id}\nEbar movie file pathao, DB te save hobe")
+
+# File handle - forward check bad diyechi
+@bot.message_handler(content_types=['document','video','audio','photo'])
+def handle_file(m):
+    db_ch = get_db()
         return bot.send_message(m.chat.id, f"✅ DB Set: {m.forward_from_chat.id}")
     db_ch = get_db()
     if not db_ch:
