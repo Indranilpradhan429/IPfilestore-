@@ -2,3 +2,5 @@ pyTelegramBotAPI
 pymongo
 Flask
 requests
+dnspython
+python-dotenv
