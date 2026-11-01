@@ -8,12 +8,9 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 MONGO_URL = os.environ.get("MONGO_URL") or os.environ.get("DB_URI")
 DB_CH_ENV = os.environ.get("DB_CHANNEL")
 
-print(f"BOT_TOKEN: {bool(BOT_TOKEN)}, MONGO: {bool(MONGO_URL)}, DB_CH: {DB_CH_ENV}")
-
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 
-# DB setup with try-except - jate crash na kore
 try:
     client = MongoClient(MONGO_URL)
     db = client["vjbot"]
@@ -58,7 +55,6 @@ def start(m):
     args = m.text.split()
     s = get_set()
     db_ch = get_db()
-    # File get
     if len(args) > 1:
         fid = args[1]
         if fid.startswith("batch_"):
@@ -76,78 +72,56 @@ def start(m):
         else:
             try:
                 data = files_col.find_one({"file_id":fid})
-                if not data: return bot.send_message(m.chat.id, f"👋 Hi {m.from_user.first_name}\nFile not found")
+                if not data: return bot.send_message(m.chat.id, f"👋 Hi {m.from_user.first_name}")
                 cap = data.get("caption","")
                 bot.copy_message(m.chat.id, db_ch, data["msg_id"], caption=cap if cap else None, protect_content=s.get("protect", False))
             except Exception as e:
                 bot.send_message(m.chat.id, f"Error: {e}")
             return
-    bot.send_message(m.chat.id, f"👋 Hi {m.from_user.first_name}\n\n📂 File pathao - alada lekha dite parbe\n📦 /batch - multifile\n⚙️ /panel - sob setting")
+    bot.send_message(m.chat.id, f"👋 Hi {m.from_user.first_name}\n\n📂 File pathao\n📦 /batch - multifile\n⚙️ /panel - setting")
 
 @bot.message_handler(commands=['panel','settings'])
 def panel(m):
     s = get_set()
-    txt = f"""🛠️ **ALL SETTINGS - BOT ER VITORE**
-
-🔒 Copy: {'❌ OFF' if s.get('protect') else '✅ ON (Sobai copy korte parbe)'}
-📝 Caption: {s.get('caption','')[:80]}
-⏳ AutoDel: {s.get('autodelete')}s
-📢 FSub: {s.get('fsub')}
-💰 Monet: {s.get('short_on')}
-🎫 Verify: {s.get('verify_on')}
-📡 Stream: OFF
-📦 Multifile: ON
-DB: {get_db()}
-"""
+    txt = f"🛠️ ALL SETTINGS\n\nCopy: {'OFF' if s.get('protect') else 'ON'}\nCaption: {s.get('caption','')[:80]}\nDB: {get_db()}\nFSub: {s.get('fsub')}"
     mk = telebot.types.InlineKeyboardMarkup(row_width=2)
     mk.add(
         telebot.types.InlineKeyboardButton(f"Copy {'ON' if s.get('protect') else 'OFF'}", callback_data="prot"),
         telebot.types.InlineKeyboardButton(f"AutoDel {s.get('autodelete')}", callback_data="auto"),
-        telebot.types.InlineKeyboardButton("📝 Set Caption", callback_data="setcap"),
-        telebot.types.InlineKeyboardButton("📢 Add FSub", callback_data="addfsub"),
-        telebot.types.InlineKeyboardButton("🗑️ Clear FSub", callback_data="clear"),
-        telebot.types.InlineKeyboardButton("💰 Monet", callback_data="mon"),
-        telebot.types.InlineKeyboardButton("Status", callback_data="status")
+        telebot.types.InlineKeyboardButton("Set Caption", callback_data="setcap"),
+        telebot.types.InlineKeyboardButton("Add FSub", callback_data="addfsub"),
+        telebot.types.InlineKeyboardButton("Clear FSub", callback_data="clear")
     )
-    bot.send_message(m.chat.id, txt, reply_markup=mk, parse_mode="Markdown")
+    bot.send_message(m.chat.id, txt, reply_markup=mk)
 
 @bot.callback_query_handler(func=lambda c: True)
 def cb(c):
     s = get_set()
     if c.data == "prot":
         update("protect", not s.get("protect", False))
-        bot.answer_callback_query(c.id, "Copy toggled")
     elif c.data == "auto":
         nxt = 0 if s.get("autodelete") != 0 else 300
         update("autodelete", nxt)
-        bot.answer_callback_query(c.id, f"Auto {nxt}")
     elif c.data == "clear":
         update("fsub", [])
-        bot.answer_callback_query(c.id, "FSub cleared")
-    elif c.data == "mon":
-        update("short_on", not s.get("short_on", False))
-        bot.answer_callback_query(c.id, "Monet toggled")
     elif c.data == "setcap":
         pending[c.from_user.id] = {"type":"caption"}
-        bot.send_message(c.message.chat.id, "✏️ Notun caption likho:\n{file_name} use koro file name er jonno\nJemon: 🎬 {file_name} Join @channel")
+        bot.send_message(c.message.chat.id, "✏️ Caption likho: {file_name} use koro")
         return
     elif c.data == "addfsub":
         pending[c.from_user.id] = {"type":"fsub"}
         bot.send_message(c.message.chat.id, "📢 FSub dao: @channel")
         return
-    elif c.data == "status":
-        cnt = 0
-        try: cnt = files_col.count_documents({})
-        except: pass
-        bot.answer_callback_query(c.id, f"Files: {cnt}")
-    try: panel(c.message)
+    bot.answer_callback_query(c.id, "Done")
+    try:
+        panel(c.message)
     except: pass
 
 @bot.message_handler(func=lambda m: m.from_user.id in pending and pending[m.from_user.id].get("type")=="caption")
 def set_cap(m):
     update("caption", m.text)
     pending.pop(m.from_user.id, None)
-    bot.send_message(m.chat.id, f"✅ Caption set:\n{m.text}")
+    bot.send_message(m.chat.id, f"✅ Caption set: {m.text}")
 
 @bot.message_handler(func=lambda m: m.from_user.id in pending and pending[m.from_user.id].get("type")=="fsub")
 def set_fsub(m):
@@ -162,7 +136,7 @@ def set_fsub(m):
 @bot.message_handler(commands=['batch'])
 def batch_start(m):
     batch_mode[m.from_user.id] = []
-    bot.send_message(m.chat.id, "📦 Multifile ON\nFile pathao, lekha chaibo\nDone: /batch_done")
+    bot.send_message(m.chat.id, "📦 Multifile ON\nFile pathao\nDone: /batch_done")
 
 @bot.message_handler(commands=['batch_done'])
 def batch_done(m):
@@ -178,35 +152,37 @@ def batch_done(m):
     bot.send_message(m.chat.id, f"✅ Saved {len(mids)} files\n🔗 {link}")
     batch_mode[m.from_user.id] = []
 
-@bot.message_handler(commands=['batch_cancel'])
-def batch_cancel(m):
-    batch_mode.pop(m.from_user.id, None)
-    pending.pop(m.from_user.id, None)
-    bot.send_message(m.chat.id, "❌ Cancelled")
+@bot.message_handler(commands=['setdb'])
+def setdb_cmd(m):
+    args = m.text.split()
+    if len(args) > 1:
+        try:
+            cid = int(args[1])
+            update("db_channel", cid)
+            bot.send_message(m.chat.id, f"✅ DB Set: {cid}")
+        except:
+            bot.send_message(m.chat.id, "❌ ID vul, -100 diye suru hobe")
+    else:
+        bot.send_message(m.chat.id, "Use: /setdb -100123456789\nBa DB channel er text post forward koro")
 
-@bot.message_handler(content_types=['document','video','audio','photo'])
-def handle_file(m):
-    # DB Set sudhu text forward e hobe, movie forward e na
-@bot.message_handler(func=lambda m: m.forward_from_chat and not m.document and not m.video and not m.photo)
-def set_db(m):
+@bot.message_handler(func=lambda m: m.forward_from_chat is not None and m.text is not None)
+def set_db_text(m):
     update("db_channel", m.forward_from_chat.id)
-    bot.send_message(m.chat.id, f"✅ DB Set: {m.forward_from_chat.id}\nEbar movie file pathao, DB te save hobe")
+    bot.send_message(m.chat.id, f"✅ DB Set: {m.forward_from_chat.id}\nEbar movie file pathao")
 
-# File handle - forward check bad diyechi
 @bot.message_handler(content_types=['document','video','audio','photo'])
 def handle_file(m):
-    db_ch = get_db()
-        return bot.send_message(m.chat.id, f"✅ DB Set: {m.forward_from_chat.id}")
     db_ch = get_db()
     if not db_ch:
-        return bot.send_message(m.chat.id, "❌ DB set koro - channel er ekta post forward koro")
+        return bot.send_message(m.chat.id, "❌ DB set koro - /setdb -100xxx ba DB channel er TEXT post forward koro, movie na")
     if m.from_user.id in batch_mode:
         if m.caption:
             try:
                 f = bot.forward_message(db_ch, m.chat.id, m.message_id)
                 batch_mode[m.from_user.id].append((f.message_id, m.caption))
                 bot.send_message(m.chat.id, f"✅ Added {len(batch_mode[m.from_user.id])}")
-            except: pass
+            except Exception as e:
+                bot.send_message(m.chat.id, f"Error forward: {e}\nBot ke DB channel e admin koro")
         else:
             pending[m.from_user.id] = {"type":"file","msg_id":m.message_id,"is_batch":True}
             bot.send_message(m.chat.id, "✏️ Ei file er jonno ki likhbo? Lekha pathao\n/skip for no caption")
@@ -218,7 +194,7 @@ def handle_file(m):
             link = f"https://t.me/{bot.get_me().username}?start=file_{f.message_id}"
             bot.send_message(m.chat.id, f"✅ Saved\n📝 {m.caption}\n🔗 {link}")
         except Exception as e:
-            bot.send_message(m.chat.id, f"Error {e}")
+            bot.send_message(m.chat.id, f"Error: {e}\nBot admin kina check koro")
     else:
         pending[m.from_user.id] = {"type":"file","msg_id":m.message_id,"is_batch":False}
         bot.send_message(m.chat.id, "✏️ Ki likhbo? Movie name pathao\n/skip for no caption")
@@ -239,15 +215,13 @@ def save_file_cap(m):
             link = f"https://t.me/{bot.get_me().username}?start=file_{f.message_id}"
             bot.send_message(m.chat.id, f"✅ Saved\n📝 {cap}\n🔗 {link}\n✅ Copy ON")
     except Exception as e:
-        bot.send_message(m.chat.id, f"Error {e}")
+        bot.send_message(m.chat.id, f"Error: {e}")
 
 def run_bot():
     try:
         bot.delete_webhook(drop_pending_updates=True)
-        print("Webhook deleted")
-    except Exception as e:
-        print(f"Webhook err {e}")
-    print("Bot polling start - Full Panel")
+    except: pass
+    print("Bot polling start - Full Panel Fixed")
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60, skip_pending=True)
