@@ -1,6 +1,4 @@
-import os, time, requests, threading
-import telebot
-from telebot import types
+import telebot, threading, time
 from flask import Flask
 import config
 from database import get_settings, update_settings, save_file, get_file
@@ -8,93 +6,96 @@ from database import get_settings, update_settings, save_file, get_file
 bot = telebot.TeleBot(config.BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 
-def get_db_channel():
-    s = get_settings()
-    # Age settings e thakle seta use korbe, na hole config theke
-    return s.get("db_channel") or config.DB_CHANNEL
-
 @app.route('/')
 def home():
-    return "✅ Bot Live - Auto DB Mode"
+    return "✅ Bot is Live - Final Version"
+
+def get_db():
+    s = get_settings()
+    db = s.get("db_channel") or config.DB_CHANNEL
+    return db
 
 @bot.message_handler(commands=['start'])
-def start_cmd(m):
+def start(m):
     args = m.text.split()
     if len(args) > 1:
-        file_id = args[1]
-        s = get_settings()
-        for ch in s.get("fsub", []):
-            try:
-                st = bot.get_chat_member(ch, m.from_user.id).status
-                if st in ['left', 'kicked']:
-                    bot.send_message(m.chat.id, f"⚠️ Join: {ch}")
-                    return
-            except:
-                pass
-        data = get_file(file_id)
+        data = get_file(args[1])
         if not data:
-            bot.send_message(m.chat.id, "❌ File not found!")
+            bot.send_message(m.chat.id, "❌ File not found")
             return
+        s = get_settings()
         try:
-            db_ch = get_db_channel()
-            sent = bot.copy_message(m.chat.id, db_ch, data['msg_id'], protect_content=s.get("protect", False))
+            bot.copy_message(m.chat.id, get_db(), data['msg_id'], protect_content=s.get("protect", False))
         except Exception as e:
-            bot.send_message(m.chat.id, f"❌ DB Error: {e}\n/setdb command use korun")
+            bot.send_message(m.chat.id, f"Error: {e}")
     else:
-        bot.send_message(m.chat.id, f"👋 Hello {m.from_user.first_name}!\nBot Running ✅\nDB: {get_db_channel()}")
+        bot.send_message(m.chat.id, f"Hi {m.from_user.first_name}\nBot Live ✅\nDB: {get_db()}\nSend /panel")
 
-# Eita holo main fix - channel theke forward korle auto set hobe
-@bot.message_handler(content_types=['document', 'video', 'audio', 'photo'])
-def save(m):
-    # Jodi channel theke forward hoye ase (forward_from_chat thakle)
+@bot.message_handler(content_types=['document','video','audio','photo'])
+def files(m):
     if m.forward_from_chat:
         update_settings("db_channel", m.forward_from_chat.id)
-        bot.send_message(m.chat.id, f"✅ DB Channel Auto Set! ID: {m.forward_from_chat.id}\nEbar theke ekhane save hobe.")
+        bot.send_message(m.chat.id, f"✅ DB Set: {m.forward_from_chat.id}\nEbar file pathao")
         return
-
+    db = get_db()
+    if not db or db==0:
+        bot.send_message(m.chat.id, "❌ DB set koro:\nDB Channel er 1ta post ekhane forward koro")
+        return
     try:
-        db_ch = get_db_channel()
-        if not db_ch or db_ch == 0:
-            bot.send_message(m.chat.id, "❌ Age DB Channel set korun:\n1. DB Channel er ekta post forward korun ekhane\n2. Bot auto set kore nebe")
-            return
-            
-        sent = bot.forward_message(db_ch, m.chat.id, m.message_id)
-        file_id = f"file_{sent.message_id}"
-        save_file(file_id, sent.message_id)
-        bot_username = bot.get_me().username
-        link = f"https://t.me/{bot_username}?start={file_id}"
-        bot.send_message(m.chat.id, f"✅ Saved!\n\n🔗 Link: {link}\n📂 DB: {db_ch}")
+        fwd = bot.forward_message(db, m.chat.id, m.message_id)
+        fid = f"file_{fwd.message_id}"
+        save_file(fid, fwd.message_id)
+        uname = bot.get_me().username
+        link = f"https://t.me/{uname}?start={fid}"
+        bot.send_message(m.chat.id, f"✅ Saved!\n🔗 {link}\nCopy ON")
     except Exception as e:
-        bot.send_message(m.chat.id, f"❌ Error: {e}\n\nFix:\n1. Bot ke DB Channel e admin korun\n2. DB Channel er ekta post ekhane forward korun, bot ID dhore nebe")
+        bot.send_message(m.chat.id, f"❌ Error: {e}\nBot ke DB Channel e admin koro")
 
-@bot.message_handler(commands=['setdb', 'panel', 'settings', 'id'])
+@bot.message_handler(commands=['panel','settings','id'])
 def panel(m):
     s = get_settings()
-    txt = f"⚙️ **Panel**\n\nYour ID: {m.from_user.id}\nDB Channel: {get_db_channel()}\nProtect: {s.get('protect')}\nFSub: {s.get('fsub')}"
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton(f"Protect: {s.get('protect')}", callback_data="toggle_protect"))
-    markup.add(types.InlineKeyboardButton("Autodelete OFF = Copy ON", callback_data="auto_0"))
-    bot.send_message(m.chat.id, txt, reply_markup=markup, parse_mode="Markdown")
+    txt = f"⚙️ Panel\nID: {m.from_user.id}\nDB: {get_db()}\nProtect: {s.get('protect')}\nCopy: {'OFF' if s.get('protect') else 'ON'}"
+    mk = telebot.types.InlineKeyboardMarkup()
+    mk.add(telebot.types.InlineKeyboardButton(f"Protect {s.get('protect')} (Copy toggle)", callback_data="prot"))
+    mk.add(telebot.types.InlineKeyboardButton("Clear FSub", callback_data="clear"))
+    bot.send_message(m.chat.id, txt, reply_markup=mk)
 
 @bot.callback_query_handler(func=lambda c: True)
 def cb(c):
     s = get_settings()
-    if c.data == "toggle_protect":
+    if c.data=="prot":
         update_settings("protect", not s.get("protect", False))
-        bot.answer_callback_query(c.id, f"Protect: {not s.get('protect', False)}")
-    elif c.data == "auto_0":
-        update_settings("autodelete", 0)
-        bot.answer_callback_query(c.id, "Copy ON - Autodelete OFF")
+        bot.answer_callback_query(c.id, "Changed! OFF = Copy ON")
+    if c.data=="clear":
+        update_settings("fsub", [])
+        bot.answer_callback_query(c.id, "FSub cleared")
+    s = get_settings()
+    txt = f"⚙️ Panel\nID: {c.from_user.id}\nDB: {get_db()}\nProtect: {s.get('protect')}\nCopy: {'OFF' if s.get('protect') else 'ON'}"
+    try:
+        bot.edit_message_text(txt, c.message.chat.id, c.message.message_id, reply_markup=c.message.reply_markup)
+    except:
+        pass
 
-def run_bot():
+@bot.message_handler(commands=['fsub'])
+def fsub(m):
+    try:
+        ch = m.text.split()[1]
+        s = get_settings()
+        lst = s.get("fsub", [])
+        if ch in lst: lst.remove(ch)
+        else: lst.append(ch)
+        update_settings("fsub", lst)
+        bot.send_message(m.chat.id, f"FSub: {lst}")
+    except:
+        bot.send_message(m.chat.id, "Use: /fsub @channel")
+
+def run():
     while True:
         try:
-            print("Bot Running - Auto DB Mode")
+            print("Bot Running Final")
             bot.infinity_polling()
-        except Exception as e:
-            print(e)
+        except:
             time.sleep(5)
-
-threading.Thread(target=run_bot, daemon=True).start()
-if __name__ == "__main__":
+threading.Thread(target=run, daemon=True).start()
+if __name__=="__main__":
     app.run(host="0.0.0.0", port=10000)
